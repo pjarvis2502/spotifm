@@ -1,6 +1,4 @@
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
-
 use actix_web::{
     middleware, rt,
     web::{self, Data, Form, Path},
@@ -166,40 +164,19 @@ pub async fn search(
     session: Data<Arc<Mutex<Session>>>,
 ) -> HttpResponse {
     let query = web::Query::<HashMap<String, String>>::from_query(req.query_string()).unwrap();
-    let search_type = match path.0 .0.to_string().to_lowercase().as_str() {
-        "track" => SearchType::Track,
-        "artist" => SearchType::Artist,
-        "album" => SearchType::Album,
-        "playlist" => SearchType::Playlist,
-        _ => SearchType::Track,
-    };
-
-    return match api(session).await {
+    return match spotify_get(
+        session,
+        format!(
+            "https://api.spotify.com/v1/search?q={}&type={}&limit={}",
+            query.get("q").unwrap(),
+            path.0 .0.to_string().to_lowercase(),
+            path.1
+        ),
+    )
+    .await
+    {
         Err(err) => HttpResponse::Ok().json(HashMap::from([("error", err)])),
-        Ok(spotify) => {
-            return match spotify.search(
-                query.get("q").unwrap(),
-                search_type,
-                None,
-                None,
-                Some(path.1),
-                None,
-            ) {
-                Ok(result) => match result {
-                    SearchResult::Tracks(track) => return HttpResponse::Ok().json(track.items),
-                    SearchResult::Artists(artist) => return HttpResponse::Ok().json(artist.items),
-                    SearchResult::Albums(album) => return HttpResponse::Ok().json(album.items),
-                    SearchResult::Playlists(playlist) => {
-                        return HttpResponse::Ok().json(playlist.items)
-                    }
-                    _ => {
-                        return HttpResponse::NotFound()
-                            .json(HashMap::from([("error", "no results")]))
-                    }
-                },
-                Err(err) => HttpResponse::Ok().json(HashMap::from([("error", err.to_string())])),
-            };
-        }
+        Ok(result) => HttpResponse::Ok().json(result),
     };
 }
 
@@ -265,25 +242,9 @@ pub async fn queue(
         return HttpResponse::Ok().json(next_playing);
     }
 
-    return match api(session).await {
-        Err(err) => HttpResponse::Ok().json(HashMap::from([("error", err.unwrap().to_string())])),
-        Ok(spotify) => {
-            return match spotify.track(TrackId::from_id(path.0).unwrap()) {
-                Err(err) => HttpResponse::Ok().json(HashMap::from([("error", err.to_string())])),
-                Ok(track) => {
-                    let spotify_track = SpotifyTrack::new(
-                        track
-                            .id
-                            .unwrap()
-                            .to_string()
-                            .split(":")
-                            .collect::<Vec<&str>>()
-                            .get(2)
-                            .unwrap()
-                            .to_string(),
-                        track.name,
-                        track.artists.iter().map(|x| x.clone().name).collect(),
-                    );
+    return match spotify_track(session, path.0.clone()).await {
+        Err(err) => HttpResponse::Ok().json(HashMap::from([("error", err)])),
+        Ok(spotify_track) => {
                     return match db.queue_track(spotify_track.clone()) {
                         Err(err) => {
                             HttpResponse::Ok().json(HashMap::from([("error", err.to_string())]))
@@ -301,8 +262,6 @@ pub async fn queue(
                             }
                         }
                     };
-                }
-            }
         }
     };
 }
@@ -323,25 +282,9 @@ pub async fn play(
         return HttpResponse::Ok().json(next_playing);
     }
 
-    return match api(session).await {
-        Err(err) => HttpResponse::Ok().json(HashMap::from([("error", err.unwrap().to_string())])),
-        Ok(spotify) => {
-            return match spotify.track(TrackId::from_id(path.0).unwrap()) {
-                Err(err) => HttpResponse::Ok().json(HashMap::from([("error", err.to_string())])),
-                Ok(track) => {
-                    let spotify_track = SpotifyTrack::new(
-                        track
-                            .id
-                            .unwrap()
-                            .to_string()
-                            .split(":")
-                            .collect::<Vec<&str>>()
-                            .get(2)
-                            .unwrap()
-                            .to_string(),
-                        track.name,
-                        track.artists.iter().map(|x| x.clone().name).collect(),
-                    );
+    return match spotify_track(session, path.0.clone()).await {
+        Err(err) => HttpResponse::Ok().json(HashMap::from([("error", err)])),
+        Ok(spotify_track) => {
                     return match db.queue_track(spotify_track.clone()) {
                         Err(err) => {
                             HttpResponse::Ok().json(HashMap::from([("error", err.to_string())]))
@@ -366,8 +309,6 @@ pub async fn play(
                             }
                         }
                     };
-                }
-            }
         }
     };
 }
@@ -380,27 +321,57 @@ pub async fn show_playlist(db: Data<SpotifyDatabase>) -> HttpResponse {
     };
 }
 
-async fn api(session: Data<Arc<Mutex<Session>>>) -> Result<AuthCodeSpotify, Option<String>> {
+async fn spotify_get(
+    session: Data<Arc<Mutex<Session>>>,
+    url: String,
+) -> Result<serde_json::Value, String> {
     return match keymaster::get_token(&session.lock().unwrap(), CLIENT_ID, SCOPES).await {
-        Err(_) => Err(Some("could not get token".to_string())),
-        Ok(search_token) => {
-            let token = rspotify::Token {
-                access_token: search_token.access_token.clone(),
-                expires_in: ChronoDuration::seconds(search_token.expires_in.into()),
-                expires_at: Some(
-                    Utc::now() + ChronoDuration::seconds(search_token.expires_in.into()),
-                ),
-                refresh_token: None,
-                scopes: HashSet::from_iter(SCOPES.split(",").into_iter().map(|x| x.to_string())),
-            };
-
-            let mut spotify = rspotify::AuthCodeSpotify::from_token(token.clone());
-
-            spotify.creds.id = CLIENT_ID.to_string();
-
-            Ok(spotify)
-        }
+        Err(_) => Err("could not get token".to_string()),
+        Ok(token) => match ureq::get(&url)
+            .set("Authorization", &format!("Bearer {}", token.access_token))
+            .call()
+        {
+            Ok(response) => response
+                .into_json::<serde_json::Value>()
+                .map_err(|err| err.to_string()),
+            Err(err) => Err(err.to_string()),
+        },
     };
+}
+
+async fn spotify_track(
+    session: Data<Arc<Mutex<Session>>>,
+    track_id: String,
+) -> Result<SpotifyTrack, String> {
+    let track = spotify_get(
+        session,
+        format!("https://api.spotify.com/v1/tracks/{}", track_id),
+    )
+    .await?;
+
+    let id = track
+        .get("id")
+        .and_then(|value| value.as_str())
+        .unwrap_or(track_id.as_str())
+        .to_string();
+    let name = track
+        .get("name")
+        .and_then(|value| value.as_str())
+        .unwrap_or("")
+        .to_string();
+    let artists = track
+        .get("artists")
+        .and_then(|value| value.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|artist| artist.get("name").and_then(|value| value.as_str()))
+                .map(|name| name.to_string())
+                .collect::<Vec<String>>()
+        })
+        .unwrap_or_default();
+
+    Ok(SpotifyTrack::new(id, name, artists))
 }
 
 #[actix_rt::main]

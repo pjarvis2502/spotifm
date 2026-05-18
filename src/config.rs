@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::error::Error;
 use std::fmt;
 
-#[derive(Serialize, Clone, Deserialize)]
+#[derive(Serialize, Clone, Deserialize, Debug)]
 pub struct SpotifmConfig {
     pub user: Option<String>,
     pub pass: Option<String>,
@@ -37,19 +37,19 @@ impl fmt::Display for SpotifmConfigError {
 
 impl Error for SpotifmConfigError {}
 
-#[derive(Serialize, Clone, Deserialize)]
+#[derive(Serialize, Clone, Deserialize, Debug)]
 pub struct SpotifmAnnounceConfig {
     pub song: SpotifmSongConfig,
     pub bumper: SpotifmBumperConfig,
 }
 
-#[derive(Serialize, Clone, Deserialize)]
+#[derive(Serialize, Clone, Deserialize, Debug)]
 pub struct SpotifmSongConfig {
     pub enable: bool,
     pub espeak: SpotifmEspeakCfg,
 }
 
-#[derive(Serialize, Clone, Deserialize)]
+#[derive(Serialize, Clone, Deserialize, Debug)]
 pub struct SpotifmBumperConfig {
     idx: Option<usize>,
     pub enable: bool,
@@ -58,13 +58,13 @@ pub struct SpotifmBumperConfig {
     pub espeak: SpotifmEspeakCfg,
 }
 
-#[derive(Serialize, Clone, Deserialize)]
+#[derive(Serialize, Clone, Deserialize, Debug)]
 pub struct SpotifmElevenLabsCfg {
     pub key: String,
     pub voice: String,
 }
 
-#[derive(Serialize, Clone, Deserialize)]
+#[derive(Serialize, Clone, Deserialize, Debug)]
 pub struct SpotifmEspeakCfg {
     pub speed: u32,
     pub amplitude: u32,
