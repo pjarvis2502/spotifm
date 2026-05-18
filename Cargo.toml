@@ -26,7 +26,7 @@ actix-web = "3.0.0-alpha.1"
 serde = "1.0.106"
 serde_json = "1.0.51"
 env_logger = "0.7.1"
-chrono = "=0.4.31"
+chrono = { version = "=0.4.31", features = ["rustc-serialize"] }
 iconv = "*"
 rand = "0.8.5"
 
