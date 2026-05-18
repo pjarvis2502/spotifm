@@ -1,22 +1,15 @@
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use actix_web::{
     middleware, rt,
-    web::{self, Data, Path, Form},
+    web::{self, Data, Form, Path},
     App, HttpRequest, HttpResponse, HttpServer,
 };
-use std::sync::{Arc, Mutex};
-use chrono::{Duration as ChronoDuration, Utc};
 use librespot::core::{keymaster, session::Session, spotify_id::SpotifyId};
 use librespot::playback::player::PlayerEvent;
-use rspotify::{
-    model::{SearchResult, SearchType, TrackId},
-    prelude::*,
-    AuthCodeSpotify,
-};
 use std::collections::HashMap;
-use std::collections::HashSet;
-use std::iter::FromIterator;
+use std::sync::{Arc, Mutex};
 use std::{sync::mpsc::SyncSender, thread};
 
 use crate::db::{SpotifyDatabase, SpotifyTrack};
