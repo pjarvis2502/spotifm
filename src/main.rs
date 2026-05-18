@@ -18,7 +18,7 @@ mod signals;
 mod config;
 mod announce;
 
-use config::SpotifmConfig;
+use config::{SpotifyLoginConfig, SpotifmConfig};
 
 const BACKEND: &str = "pulseaudio";
 
@@ -126,7 +126,16 @@ async fn main() {
 pub async fn create_session(config: &Arc<Mutex<SpotifmConfig>>) -> Session {
     let config = config.lock().unwrap();
     let session_config = SessionConfig::default();
-    let credentials = Credentials::with_password(config.user.clone(), config.pass.clone());
+    let login_config = config.spotify_login_config()
+        .map_err(|err| { eprintln!("Error reading Spotify login config: {}", err.to_string())} )
+        .unwrap();
+
+    let credentials = match login_config {
+        SpotifyLoginConfig::Password { user, pass } => Credentials::with_password(user, pass),
+        SpotifyLoginConfig::SessionCache { .. } => {
+            panic!("session_cache Spotify login is parsed but not implemented for live librespot sessions yet")
+        }
+    };
 
     let (session, _) = Session::connect(session_config, credentials, None, false).await
         .map_err(|err| { eprintln!("Error creating session: {}", err.to_string())} )
